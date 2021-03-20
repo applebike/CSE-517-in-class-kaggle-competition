@@ -1,0 +1,142 @@
+---
+title: "Kaggle competition 1"
+author: "Yujie Fu"
+date: "2021/2/23"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+# Read data and import packages
+library(glmnet)
+library(randomForest)
+library(neuralnet)
+library(nnet)
+library(caret)
+data = read.csv("C:/Users/13159/Desktop/CSE517/wustl-cse517a-sp21-milestone1/train.csv")
+data.eval = read.csv("C:/Users/13159/Desktop/CSE517/wustl-cse517a-sp21-milestone1/test.csv")
+data.original = data
+data.eval.original = data.eval
+
+# Remove ID and soil-type column in both training and evaluation data
+data = subset(data, select = -c(ID,Soil_Type))
+data.eval = subset(data.eval, select = -c(ID,Soil_Type))
+
+# Convert soil-type to categotical variable
+# data$Soil_Type = as.factor(data$Soil_Type)
+# data.eval$Soil_Type = as.factor(data.eval$Soil_Type)
+# names(data)
+```
+
+```{r}
+# Randomly split data by half, half for training and half for testing
+set.seed(3)
+training = sample(1:nrow(data), nrow(data)/2)
+data.train = data[training, ]
+data.test = data[-training, ]
+data.test.ori = data.test
+```
+
+```{r}
+# implement linear regression 
+linear_reg = lm(Horizontal_Distance_To_Fire_Points~., data = data.train)
+linear_pred = predict(linear_reg, data.test)
+mean((linear_pred - data.test$Horizontal_Distance_To_Fire_Points)^2)^0.5
+```
+
+```{r}
+# implement ridge regression
+x.train = model.matrix(Horizontal_Distance_To_Fire_Points~., data = data.train)
+x.test = model.matrix(Horizontal_Distance_To_Fire_Points~., data = data.test)
+y = data.train$Horizontal_Distance_To_Fire_Points
+ridge_reg = glmnet(x.train, y, alpha = 0)
+pred.ridge = predict(ridge_reg, s=0.00, x = x.train, y = y, newx = x.test)
+mean((pred.ridge - data.test$Horizontal_Distance_To_Fire_Points)^2)^0.5
+```
+
+```{r}
+# # Implement bagged tree
+# Default 500 trees
+# set.seed(888)
+# bag = randomForest(Horizontal_Distance_To_Fire_Points~., data = data.train, mtry = ncol(data.train)-1, importance = T, ntree = 1000)
+# pred.bag = predict(bag, data.test)
+# mean((pred.bag - data.test$Horizontal_Distance_To_Fire_Points)^2)^0.5
+# pred.bag2 = predict(bag, data.train)
+# mean((pred.bag2 - data.train$Horizontal_Distance_To_Fire_Points)^2)^0.5
+# bag
+```
+
+```{r}
+data = data.train
+# Implement Cross Validation in bagged tree
+pred_t = rep(0, nrow(data)/2)
+for (i in 1:5){
+  set.seed(i)
+  # Data split
+  training = sample(1:nrow(data), nrow(data)/2)
+  data.train = data[training, ]
+  data.test = data[-training, ]
+  bag = randomForest(Horizontal_Distance_To_Fire_Points~., data = data.train, mtry = ncol(data.train)-1, importance = T, ntree = 500)
+  pred.bag = predict(bag, data.test.ori)
+  pred_t = pred_t + pred.bag
+  # 
+  # mse = mean((pred.bag - data.test$Horizontal_Distance_To_Fire_Points)^2)^0.5
+  # mse
+}
+mean((pred_t/5 - data.test.ori$Horizontal_Distance_To_Fire_Points)^2)^0.5
+```
+
+```{r}
+# # Implement random forest with half variables
+# # Default 500 trees
+# set.seed(666)
+# rf = randomForest(Horizontal_Distance_To_Fire_Points~., data = data.train, mtry = ncol(data.train)-1-4, importance = T)
+# pred.rf = predict(rf, data.test)
+# mean((pred.rf - data.test$Horizontal_Distance_To_Fire_Points)^2)^0.5
+```
+
+```{r}
+#data scaling
+dif = max(data$Horizontal_Distance_To_Fire_Points) - min(data$Horizontal_Distance_To_Fire_Points)
+data = predict(preProcess(data, method = "range"), data)
+# summary(data)
+
+# split
+set.seed(11)
+training = sample(1:nrow(data), nrow(data)/2)
+data.train = data[training, ]
+data.test = data[-training, ]
+data.test.ori = data.original[-training, ]
+
+# Implement neural network with one hidden layer, 5 nodes.
+temp = subset(data.test, select = -c(Horizontal_Distance_To_Fire_Points))
+nn1 = neuralnet(Horizontal_Distance_To_Fire_Points~., data = data, hidden = c(50,50,50,35), linear.output = F)
+pred.nn1 = compute(nn1, temp)$net.result
+
+mean((pred.nn1*dif+min(data$Horizontal_Distance_To_Fire_Points)
+      - data.test.ori$Horizontal_Distance_To_Fire_Points)^2)^0.5
+```
+
+```{r}
+# Export nn model data
+data.eval.sca = predict(preProcess(data.eval, method = "range"), data.eval)
+pred.nn1 = compute(nn1, data.eval.sca)$net.result
+data.eval.original["Horizontal_Distance_To_Fire_Points"] = pred.nn1*dif+min(data$Horizontal_Distance_To_Fire_Points)
+```
+
+
+
+
+
+```{r}
+# Export data to the local
+#data.eval.original["Horizontal_Distance_To_Fire_Points"] = predict(linear_reg, data.eval)
+data.eval.original["Horizontal_Distance_To_Fire_Points"] = predict(bag, data.eval)
+data.eval.original = subset(data.eval.original, select = c(ID, Horizontal_Distance_To_Fire_Points))
+write.csv(data.eval.original, "C:/Users/13159/Desktop/CSE517/wustl-cse517a-sp21-milestone1/submission.csv",row.names = F)
+```
+
+
